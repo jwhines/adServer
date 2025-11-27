@@ -659,10 +659,10 @@ const schema = a.schema({
   // ============================================================================
 
   /**
-   * Get Business Analytics - Aggregate analytics data for dashboard
+   * Get Business Analytics Dashboard - Aggregate analytics data for dashboard
    * Returns summary metrics, timeline data, and top performing rewards
    */
-  getBusinessAnalytics: a
+  getBusinessDashboardAnalytics: a
     .query()
     .arguments({
       businessId: a.string().required(),
