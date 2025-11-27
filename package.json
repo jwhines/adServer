@@ -1,0 +1,25 @@
+{
+  "name": "family-rewards-ad-platform",
+  "version": "1.0.0",
+  "description": "AWS Amplify Gen 2 backend for family rewards advertising platform",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "sandbox": "ampx sandbox",
+    "deploy": "ampx sandbox delete && ampx deploy"
+  },
+  "dependencies": {
+    "@aws-amplify/backend": "^1.8.1",
+    "@aws-amplify/backend-cli": "^1.4.1",
+    "aws-amplify": "^6.9.0",
+    "aws-cdk-lib": "^2.160.0",
+    "constructs": "^10.3.0",
+    "typescript": "^5.6.3"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.8.1",
+    "@types/node": "^22.9.0"
+  }
+}
