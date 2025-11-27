@@ -7,6 +7,7 @@ node_modules/
 amplify_outputs.json
 .amplify/
 ampx-backend-identifier.ts
+schema.graphql/
 
 # Environment variables
 .env
