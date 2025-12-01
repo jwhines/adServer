@@ -1,6 +1,6 @@
 import type { Schema } from '../../data/resource';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, ListTablesCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomBytes } from 'crypto';
 
 const client = new DynamoDBClient({});
@@ -39,10 +39,10 @@ async function getTableNames() {
   const result = await dynamodb.send(new ListTablesCommand({}));
   const tables = result.TableNames || [];
 
-  rewardTableName = tables.find(t => t.startsWith('Reward-') && t.endsWith('-NONE')) || 'Reward';
-  redemptionTableName = tables.find(t => t.startsWith('RewardRedemption-') && t.endsWith('-NONE')) || 'RewardRedemption';
-  pointsTransactionTableName = tables.find(t => t.startsWith('PointsTransaction-') && t.endsWith('-NONE')) || 'PointsTransaction';
-  businessTableName = tables.find(t => t.startsWith('Business-') && t.endsWith('-NONE')) || 'Business';
+  rewardTableName = tables.find((t: string) => t.startsWith('Reward-') && t.endsWith('-NONE')) || 'Reward';
+  redemptionTableName = tables.find((t: string) => t.startsWith('RewardRedemption-') && t.endsWith('-NONE')) || 'RewardRedemption';
+  pointsTransactionTableName = tables.find((t: string) => t.startsWith('PointsTransaction-') && t.endsWith('-NONE')) || 'PointsTransaction';
+  businessTableName = tables.find((t: string) => t.startsWith('Business-') && t.endsWith('-NONE')) || 'Business';
 
   console.log(`📋 Discovered tables: Reward=${rewardTableName}, RewardRedemption=${redemptionTableName}, PointsTransaction=${pointsTransactionTableName}, Business=${businessTableName}`);
 

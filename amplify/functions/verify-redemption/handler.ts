@@ -1,6 +1,6 @@
 import type { Schema } from '../../data/resource';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, UpdateCommand, ListTablesCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -29,7 +29,7 @@ async function getTableNames() {
   const result = await dynamodb.send(new ListTablesCommand({}));
   const tables = result.TableNames || [];
 
-  redemptionTableName = tables.find(t => t.startsWith('RewardRedemption-') && t.endsWith('-NONE')) || 'RewardRedemption';
+  redemptionTableName = tables.find((t: string) => t.startsWith('RewardRedemption-') && t.endsWith('-NONE')) || 'RewardRedemption';
 
   console.log(`📋 Discovered table: RewardRedemption=${redemptionTableName}`);
 

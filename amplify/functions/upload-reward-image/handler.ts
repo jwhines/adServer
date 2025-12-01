@@ -19,9 +19,9 @@ interface UploadImageArgs {
   contentType: string;
 }
 
-export const handler: Schema['uploadRewardImage']['functionHandler'] = async (
-  event,
-  context
+export const handler = async (
+  event: any,
+  context: any
 ) => {
   const args = event.arguments as UploadImageArgs;
 

@@ -1,9 +1,8 @@
 import type { Schema } from '../../data/resource';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   ScanCommand,
-  ListTablesCommand,
 } from '@aws-sdk/lib-dynamodb';
 
 /**
@@ -68,9 +67,9 @@ interface AppMetricsRecord {
  */
 async function discoverTableName(tablePrefix: string): Promise<string | null> {
   try {
-    const listTablesResponse = await ddbDocClient.send(new ListTablesCommand({}));
+    const listTablesResponse = await client.send(new ListTablesCommand({}));
     const tables = listTablesResponse.TableNames || [];
-    const table = tables.find((t) => t.includes(tablePrefix));
+    const table = tables.find((t: string) => t.includes(tablePrefix));
     return table || null;
   } catch (error) {
     console.error('Error discovering table:', error);
