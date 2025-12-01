@@ -1,5 +1,5 @@
 import { Amplify } from 'aws-amplify';
-import amplifyOutputs from '../../amplify_outputs.json';
+import amplifyOutputs from '../amplify_outputs.json';
 
 /**
  * Configure AWS Amplify with backend outputs
