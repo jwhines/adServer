@@ -28,12 +28,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/ConfirmView.vue'),
     meta: { requiresAuth: false },
   },
-  // {
-  //   path: '/reset-password',
-  //   name: 'ResetPassword',
-  //   component: () => import('@/views/auth/ResetPasswordView.vue'),
-  //   meta: { requiresAuth: false },
-  // },
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('@/views/auth/ResetPasswordView.vue'),
+    meta: { requiresAuth: false },
+  },
 
   // Protected routes
   {
