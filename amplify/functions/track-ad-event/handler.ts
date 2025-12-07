@@ -23,31 +23,14 @@ interface TrackEventArgs {
   metadata?: Record<string, any>;
 }
 
-// Cache for table names
-let rewardTableName: string | null = null;
-let analyticsTableName: string | null = null;
-let impressionTableName: string | null = null;
-let platformAnalyticsTableName: string | null = null;
+// Get table names from environment variables
+function getTableNames() {
+  const rewardTableName = process.env.REWARD_TABLE;
+  const analyticsTableName = process.env.BUSINESS_ANALYTICS_TABLE;
+  const impressionTableName = process.env.IMPRESSION_TABLE;
+  const platformAnalyticsTableName = process.env.PLATFORM_ANALYTICS_TABLE;
 
-async function getTableNames() {
-  if (rewardTableName && analyticsTableName && impressionTableName && platformAnalyticsTableName) {
-    return { rewardTableName, analyticsTableName, impressionTableName, platformAnalyticsTableName };
-  }
-
-  // Discover table names by listing DynamoDB tables
-  const { DynamoDBClient, ListTablesCommand } = await import('@aws-sdk/client-dynamodb');
-  const dynamodb = new DynamoDBClient({});
-
-  const result = await dynamodb.send(new ListTablesCommand({}));
-  const tables = result.TableNames || [];
-
-  // Find tables matching the Amplify pattern: ModelName-{hash}-NONE
-  rewardTableName = tables.find(t => t.startsWith('Reward-') && t.endsWith('-NONE')) || 'Reward';
-  analyticsTableName = tables.find(t => t.startsWith('BusinessAnalytics-') && t.endsWith('-NONE')) || 'BusinessAnalytics';
-  impressionTableName = tables.find(t => t.startsWith('Impression-') && t.endsWith('-NONE')) || 'Impression';
-  platformAnalyticsTableName = tables.find(t => t.startsWith('PlatformAnalytics-') && t.endsWith('-NONE')) || 'PlatformAnalytics';
-
-  console.log(`📋 Discovered tables: Reward=${rewardTableName}, Analytics=${analyticsTableName}, Impression=${impressionTableName}, Platform=${platformAnalyticsTableName}`);
+  console.log(`📋 Using tables: Reward=${rewardTableName}, Analytics=${analyticsTableName}, Impression=${impressionTableName}, Platform=${platformAnalyticsTableName}`);
 
   return { rewardTableName, analyticsTableName, impressionTableName, platformAnalyticsTableName };
 }
@@ -82,7 +65,11 @@ export const handler = async (event: any) => {
 
   try {
     const today = new Date(args.timestamp).toISOString().split('T')[0];
-    const { rewardTableName: tableName, analyticsTableName: analyticsTable, impressionTableName: impressionTable, platformAnalyticsTableName: platformTable } = await getTableNames();
+    const { rewardTableName: tableName, analyticsTableName: analyticsTable, impressionTableName: impressionTable, platformAnalyticsTableName: platformTable } = getTableNames();
+
+    if (!tableName || !analyticsTable || !impressionTable || !platformTable) {
+      throw new Error('Required DynamoDB table names not found in environment variables');
+    }
 
     // 1. Create Impression record
     const impressionType = args.eventType === 'impression' ? 'IMPRESSION' : 'CLICK';

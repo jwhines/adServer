@@ -2,314 +2,436 @@
 /**
  * AdminDashboard
  *
- * Platform-wide overview for platform administrators:
- * - Total businesses (pending, approved, rejected)
- * - Total active rewards
- * - Platform revenue
- * - Top businesses by redemptions
- * - Recent signups
+ * Platform-wide overview for platform administrators using real data from:
+ * - Business table (for business counts and statuses)
+ * - Investor metrics API (for platform-wide analytics)
  */
 
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '@/amplify-config';
 import Card from '@/components/common/Card.vue';
 import Button from '@/components/common/Button.vue';
 import Badge from '@/components/common/Badge.vue';
 import MetricCard from '@/components/analytics/MetricCard.vue';
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue';
+import EnvironmentBadge from '@/components/EnvironmentBadge.vue';
 
 const router = useRouter();
+const client = generateClient<Schema>();
 
 // State
-const loading = ref(false);
+const loading = ref(true);
+const error = ref<string | null>(null);
+const businesses = ref<any[]>([]);
+const investorMetrics = ref<any>(null);
 
-// Mock platform metrics
+// Computed metrics
 const platformMetrics = ref({
-  totalBusinesses: 247,
-  pendingApprovals: 12,
-  approvedBusinesses: 218,
-  rejectedBusinesses: 17,
-  activeRewards: 1456,
-  totalRedemptions: 12834,
-  platformRevenue: 45678.50,
-  monthlyGrowth: 15.3,
+  totalBusinesses: 0,
+  pendingApprovals: 0,
+  approvedBusinesses: 0,
+  rejectedBusinesses: 0,
+  activeRewards: 0,
+  totalRedemptions: 0,
+  platformRevenue: 0,
+  monthlyGrowth: 0,
 });
 
-// Top businesses
-const topBusinesses = ref([
-  {
-    id: '1',
-    name: 'Durham Ice Cream Co',
-    redemptions: 456,
-    revenue: 3420.00,
-    status: 'APPROVED',
-  },
-  {
-    id: '2',
-    name: 'Mini Golf Paradise',
-    redemptions: 389,
-    revenue: 2918.50,
-    status: 'APPROVED',
-  },
-  {
-    id: '3',
-    name: 'Pizza Palace',
-    redemptions: 324,
-    revenue: 2430.00,
-    status: 'APPROVED',
-  },
-  {
-    id: '4',
-    name: 'Family Fun Center',
-    redemptions: 287,
-    revenue: 2152.50,
-    status: 'APPROVED',
-  },
-  {
-    id: '5',
-    name: 'Art & Craft Studio',
-    redemptions: 234,
-    revenue: 1755.00,
-    status: 'APPROVED',
-  },
-]);
+onMounted(async () => {
+  await fetchData();
+});
 
-// Recent signups
-const recentSignups = ref([
-  {
-    id: '1',
-    name: 'Durham Bowling Alley',
-    email: 'info@durhambowling.com',
-    signupDate: '2024-10-07T09:30:00Z',
-    status: 'PENDING',
-  },
-  {
-    id: '2',
-    name: 'Kids Science Museum',
-    email: 'admin@kidsscience.org',
-    signupDate: '2024-10-06T14:20:00Z',
-    status: 'PENDING',
-  },
-  {
-    id: '3',
-    name: 'Trampoline Park',
-    email: 'contact@trampolinepark.com',
-    signupDate: '2024-10-05T11:15:00Z',
-    status: 'APPROVED',
-  },
-  {
-    id: '4',
-    name: 'Book Cafe',
-    email: 'hello@bookcafe.com',
-    signupDate: '2024-10-04T16:45:00Z',
-    status: 'APPROVED',
-  },
-]);
-
-// Format date
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-};
-
-// Navigate to approvals
-const goToBusinessApprovals = () => {
-  router.push({ name: 'BusinessApprovals' });
-};
-
-const goToRewardApprovals = () => {
-  router.push({ name: 'RewardApprovals' });
-};
-
-// Fetch platform metrics
-const fetchMetrics = async () => {
+async function fetchData() {
   loading.value = true;
+  error.value = null;
+
   try {
-    // TODO: Fetch from backend
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  } catch (error) {
-    console.error('Error fetching metrics:', error);
+    // Fetch all businesses
+    const businessResult = await client.models.Business.list();
+
+    if (businessResult.data) {
+      businesses.value = businessResult.data;
+
+      // Calculate metrics from business data
+      platformMetrics.value.totalBusinesses = businesses.value.length;
+      platformMetrics.value.pendingApprovals = businesses.value.filter(
+        b => b.verificationStatus === 'PENDING'
+      ).length;
+      platformMetrics.value.approvedBusinesses = businesses.value.filter(
+        b => b.verificationStatus === 'APPROVED'
+      ).length;
+      platformMetrics.value.rejectedBusinesses = businesses.value.filter(
+        b => b.verificationStatus === 'REJECTED'
+      ).length;
+    }
+
+    // Fetch investor metrics for platform-wide data
+    const endDate = new Date().toISOString().split('T')[0];
+    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const metricsResult = await client.queries.getInvestorMetrics({
+      startDate,
+      endDate,
+    });
+
+    if (metricsResult.data) {
+      let parsedData = metricsResult.data;
+      if (typeof metricsResult.data === 'string') {
+        parsedData = JSON.parse(metricsResult.data);
+      }
+
+      investorMetrics.value = parsedData;
+
+      // Update metrics from investor data
+      if (parsedData.marketplace) {
+        platformMetrics.value.activeRewards = parsedData.marketplace.activeRewards || 0;
+      }
+      if (parsedData.revenue) {
+        platformMetrics.value.totalRedemptions = parsedData.revenue.totalRedemptions || 0;
+        platformMetrics.value.platformRevenue = parsedData.revenue.totalRevenue || 0;
+      }
+      if (parsedData.growth) {
+        platformMetrics.value.monthlyGrowth = parsedData.growth.revenueGrowthRate || 0;
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching admin data:', err);
+    error.value = err instanceof Error ? err.message : 'Failed to load admin data';
   } finally {
     loading.value = false;
   }
-};
+}
 
+// Get recent businesses sorted by creation date
+const recentSignups = ref<any[]>([]);
 onMounted(() => {
-  fetchMetrics();
+  if (businesses.value.length > 0) {
+    recentSignups.value = [...businesses.value]
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 5);
+  }
 });
+
+function goToBusinessApprovals() {
+  router.push('/admin/business-approvals');
+}
+
+function goToInvestorDashboard() {
+  router.push('/');
+}
+
+function formatDate(dateString: string) {
+  if (!dateString) return 'N/A';
+  return new Date(dateString).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getStatusColor(status: string) {
+  switch (status) {
+    case 'APPROVED': return 'success';
+    case 'PENDING': return 'warning';
+    case 'REJECTED': return 'danger';
+    default: return 'default';
+  }
+}
 </script>
 
 <template>
-  <div class="container mx-auto px-4 py-8">
-    <!-- Header -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-900">Platform Administration</h1>
-      <p class="mt-2 text-gray-600">
-        Manage businesses, rewards, and platform-wide analytics
-      </p>
+  <div class="admin-dashboard">
+    <div class="header">
+      <div>
+        <h1>Admin Dashboard</h1>
+        <p class="subtitle">Platform-wide overview and management</p>
+      </div>
+      <EnvironmentBadge />
     </div>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="flex justify-center py-12">
-      <LoadingSpinner size="lg" text="Loading platform data..." />
+    <LoadingSpinner v-if="loading" />
+
+    <div v-else-if="error" class="error-message">
+      {{ error }}
+      <button @click="fetchData" class="retry-btn">Retry</button>
     </div>
 
-    <!-- Dashboard Content -->
-    <div v-else>
-      <!-- Metric Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <MetricCard
-          title="Total Businesses"
-          :value="platformMetrics.totalBusinesses"
-          change="+8.2%"
-          trend="up"
-          icon="🏢"
-        />
-        <MetricCard
-          title="Pending Approvals"
-          :value="platformMetrics.pendingApprovals"
-          icon="⏳"
-        />
-        <MetricCard
-          title="Active Rewards"
-          :value="platformMetrics.activeRewards.toLocaleString()"
-          change="+12.5%"
-          trend="up"
-          icon="🎁"
-        />
-        <MetricCard
-          title="Platform Revenue"
-          :value="`$${platformMetrics.platformRevenue.toLocaleString()}`"
-          change="+15.3%"
-          trend="up"
-          icon="💰"
-        />
+    <div v-else class="dashboard-content">
+      <!-- Platform Metrics -->
+      <div class="metrics-section">
+        <h2>Platform Overview</h2>
+        <div class="metric-cards">
+          <MetricCard
+            title="Total Businesses"
+            :value="platformMetrics.totalBusinesses.toString()"
+            icon="🏪"
+          />
+          <MetricCard
+            title="Pending Approvals"
+            :value="platformMetrics.pendingApprovals.toString()"
+            icon="⏳"
+            @click="goToBusinessApprovals"
+            class="clickable"
+          />
+          <MetricCard
+            title="Active Rewards"
+            :value="platformMetrics.activeRewards.toString()"
+            icon="🎁"
+          />
+          <MetricCard
+            title="Total Redemptions"
+            :value="platformMetrics.totalRedemptions.toLocaleString()"
+            icon="✅"
+          />
+          <MetricCard
+            title="Platform Revenue"
+            :value="`$${platformMetrics.platformRevenue.toLocaleString()}`"
+            :change="platformMetrics.monthlyGrowth"
+            icon="💰"
+          />
+        </div>
       </div>
 
       <!-- Quick Actions -->
-      <Card class="mb-8" title="Quick Actions" padding>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <!-- Business Approvals Card -->
-          <div class="p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200">
-            <div class="flex items-center justify-between mb-4">
+      <div class="quick-actions">
+        <h2>Quick Actions</h2>
+        <div class="action-cards">
+          <Card class="action-card" @click="goToBusinessApprovals">
+            <div class="action-content">
+              <div class="action-icon">✅</div>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900">Business Approvals</h3>
-                <p class="text-sm text-gray-600 mt-1">Review and approve new businesses</p>
+                <h3>Review Business Approvals</h3>
+                <p>{{ platformMetrics.pendingApprovals }} pending</p>
               </div>
-              <span class="text-3xl">✅</span>
             </div>
-            <div class="mb-4">
-              <span class="text-3xl font-bold text-blue-600">{{ platformMetrics.pendingApprovals }}</span>
-              <span class="text-sm text-gray-600 ml-2">pending</span>
-            </div>
-            <Button variant="primary" fullWidth @click="goToBusinessApprovals">
-              Review Business Approvals
-            </Button>
-          </div>
+          </Card>
 
-          <!-- Reward Approvals Card -->
-          <div class="p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-            <div class="flex items-center justify-between mb-4">
+          <Card class="action-card" @click="goToInvestorDashboard">
+            <div class="action-content">
+              <div class="action-icon">📊</div>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900">Reward Approvals</h3>
-                <p class="text-sm text-gray-600 mt-1">Approve rewards created by businesses</p>
+                <h3>View Analytics</h3>
+                <p>Platform-wide metrics</p>
               </div>
-              <span class="text-3xl">🎯</span>
             </div>
-            <div class="mb-4">
-              <span class="text-3xl font-bold text-purple-600">--</span>
-              <span class="text-sm text-gray-600 ml-2">pending</span>
+          </Card>
+
+          <Card class="action-card" @click="router.push('/admin/reward-approvals')">
+            <div class="action-content">
+              <div class="action-icon">🎁</div>
+              <div>
+                <h3>Review Reward Approvals</h3>
+                <p>Moderate content</p>
+              </div>
             </div>
-            <Button variant="primary" fullWidth @click="goToRewardApprovals">
-              Review Reward Approvals
-            </Button>
-          </div>
+          </Card>
         </div>
-      </Card>
-
-      <!-- Two Column Layout -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Top Businesses -->
-        <Card title="Top Performing Businesses">
-          <div class="space-y-4">
-            <div
-              v-for="business in topBusinesses"
-              :key="business.id"
-              class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              <div class="flex-1">
-                <p class="font-medium text-gray-900">{{ business.name }}</p>
-                <div class="mt-1 flex items-center gap-4 text-sm text-gray-600">
-                  <span>{{ business.redemptions }} redemptions</span>
-                  <span>${{ business.revenue.toLocaleString() }}</span>
-                </div>
-              </div>
-              <Badge variant="success">{{ business.status }}</Badge>
-            </div>
-          </div>
-        </Card>
-
-        <!-- Recent Signups -->
-        <Card title="Recent Business Signups">
-          <div class="space-y-4">
-            <div
-              v-for="signup in recentSignups"
-              :key="signup.id"
-              class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              <div class="flex-1">
-                <p class="font-medium text-gray-900">{{ signup.name }}</p>
-                <p class="mt-1 text-sm text-gray-600">{{ signup.email }}</p>
-                <p class="mt-1 text-xs text-gray-500">{{ formatDate(signup.signupDate) }}</p>
-              </div>
-              <Badge
-                :variant="signup.status === 'PENDING' ? 'warning' : 'success'"
-              >
-                {{ signup.status }}
-              </Badge>
-            </div>
-          </div>
-
-          <template #footer>
-            <Button variant="secondary" fullWidth @click="goToBusinessApprovals">
-              View All Pending Approvals
-            </Button>
-          </template>
-        </Card>
       </div>
 
-      <!-- Platform Stats -->
-      <Card class="mt-6" title="Platform Statistics" padding>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="text-center p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-            <p class="text-sm text-gray-600 mb-2">Approved Businesses</p>
-            <p class="text-4xl font-bold text-blue-600">{{ platformMetrics.approvedBusinesses }}</p>
-            <p class="text-sm text-gray-600 mt-2">
-              {{ ((platformMetrics.approvedBusinesses / platformMetrics.totalBusinesses) * 100).toFixed(1) }}% of total
-            </p>
+      <!-- Recent Business Signups -->
+      <div class="recent-section">
+        <h2>Recent Business Signups</h2>
+        <Card v-if="businesses.length === 0" class="empty-card">
+          <p>No businesses registered yet.</p>
+        </Card>
+        <Card v-else>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Business Name</th>
+                  <th>Email</th>
+                  <th>Signup Date</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="business in businesses.slice(0, 10)" :key="business.id">
+                  <td class="business-name">{{ business.name }}</td>
+                  <td>{{ business.email }}</td>
+                  <td>{{ formatDate(business.createdAt) }}</td>
+                  <td>
+                    <Badge :variant="getStatusColor(business.verificationStatus || 'PENDING')">
+                      {{ business.verificationStatus || 'PENDING' }}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      @click="router.push(`/admin/business-approvals`)"
+                    >
+                      Review
+                    </Button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-
-          <div class="text-center p-6 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-            <p class="text-sm text-gray-600 mb-2">Total Redemptions</p>
-            <p class="text-4xl font-bold text-green-600">{{ platformMetrics.totalRedemptions.toLocaleString() }}</p>
-            <p class="text-sm text-gray-600 mt-2">
-              Across all businesses
-            </p>
-          </div>
-
-          <div class="text-center p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-            <p class="text-sm text-gray-600 mb-2">Monthly Growth</p>
-            <p class="text-4xl font-bold text-purple-600">{{ platformMetrics.monthlyGrowth }}%</p>
-            <p class="text-sm text-gray-600 mt-2">
-              Compared to last month
-            </p>
-          </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.admin-dashboard {
+  padding: 2rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.error-message {
+  padding: 2rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  text-align: center;
+}
+
+.retry-btn {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.dashboard-content {
+  display: grid;
+  gap: 2rem;
+}
+
+.metrics-section h2,
+.quick-actions h2,
+.recent-section h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1rem;
+}
+
+.metric-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.clickable {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.clickable:hover {
+  transform: translateY(-2px);
+}
+
+.action-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.action-card {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.action-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.action-icon {
+  font-size: 2rem;
+}
+
+.action-content h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 0.25rem;
+}
+
+.action-content p {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.empty-card {
+  padding: 2rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead {
+  background: #f9fafb;
+}
+
+th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.business-name {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+tbody tr:hover {
+  background: #f9fafb;
+}
+</style>

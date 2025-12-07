@@ -1,5 +1,5 @@
 import type { Schema } from '../../data/resource';
-import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   ScanCommand,
@@ -62,19 +62,29 @@ interface AppMetricsRecord {
   platformBreakdown?: Record<string, number>;
 }
 
+interface UserEngagementRecord {
+  eventType?: string;
+  sessionStart?: string;
+  screenName?: string;
+  rewardId?: string;
+  screensViewed?: string[];
+  rewardsViewed?: string[];
+  rewardsClicked?: string[];
+}
+
 /**
- * Discover table name dynamically
+ * Get table names from environment variables
  */
-async function discoverTableName(tablePrefix: string): Promise<string | null> {
-  try {
-    const listTablesResponse = await client.send(new ListTablesCommand({}));
-    const tables = listTablesResponse.TableNames || [];
-    const table = tables.find((t: string) => t.includes(tablePrefix));
-    return table || null;
-  } catch (error) {
-    console.error('Error discovering table:', error);
-    return null;
-  }
+function getTableNames() {
+  const appMetricsTableName = process.env.APP_METRICS_TABLE;
+  const platformAnalyticsTableName = process.env.PLATFORM_ANALYTICS_TABLE;
+  const businessTableName = process.env.BUSINESS_TABLE;
+  const rewardTableName = process.env.REWARD_TABLE;
+  const userEngagementTableName = process.env.USER_ENGAGEMENT_TABLE;
+
+  console.log(`📋 Using tables: AppMetrics=${appMetricsTableName}, PlatformAnalytics=${platformAnalyticsTableName}, Business=${businessTableName}, Reward=${rewardTableName}, UserEngagement=${userEngagementTableName}`);
+
+  return { appMetricsTableName, platformAnalyticsTableName, businessTableName, rewardTableName, userEngagementTableName };
 }
 
 /**
@@ -103,14 +113,11 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
   console.log('Get investor metrics:', args);
 
   try {
-    // Discover table names
-    const appMetricsTableName = await discoverTableName('AppMetrics');
-    const platformAnalyticsTableName = await discoverTableName('PlatformAnalytics');
-    const businessTableName = await discoverTableName('Business');
-    const rewardTableName = await discoverTableName('Reward');
+    // Get table names from environment variables
+    const { appMetricsTableName, platformAnalyticsTableName, businessTableName, rewardTableName, userEngagementTableName } = getTableNames();
 
     if (!appMetricsTableName || !platformAnalyticsTableName || !businessTableName || !rewardTableName) {
-      throw new Error('Could not discover required DynamoDB tables');
+      throw new Error('Required DynamoDB table names not found in environment variables');
     }
 
     // Query AppMetrics for date range
@@ -151,6 +158,35 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
       platformAnalyticsRecords.push(...(platformResponse.Items as PlatformAnalyticsRecord[]));
     }
 
+    // Query UserEngagement for date range (to power detailed breakdowns)
+    const userEngagementRecords: UserEngagementRecord[] = [];
+    if (userEngagementTableName) {
+      const startDateTime = `${args.startDate}T00:00:00.000Z`;
+      const endDateTime = `${args.endDate}T23:59:59.999Z`;
+
+      let lastEvaluatedKey: Record<string, any> | undefined;
+      do {
+        const engagementScan = new ScanCommand({
+          TableName: userEngagementTableName,
+          FilterExpression: '#sessionStart BETWEEN :startDate AND :endDate',
+          ExpressionAttributeNames: {
+            '#sessionStart': 'sessionStart',
+          },
+          ExpressionAttributeValues: {
+            ':startDate': startDateTime,
+            ':endDate': endDateTime,
+          },
+          ExclusiveStartKey: lastEvaluatedKey,
+        });
+
+        const engagementResponse = await ddbDocClient.send(engagementScan);
+        if (engagementResponse.Items) {
+          userEngagementRecords.push(...(engagementResponse.Items as UserEngagementRecord[]));
+        }
+        lastEvaluatedKey = engagementResponse.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+    }
+
     // Get total businesses and rewards
     const businessScan = new ScanCommand({ TableName: businessTableName });
     const businessResponse = await ddbDocClient.send(businessScan);
@@ -180,6 +216,9 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
       ? appMetricsRecords[appMetricsRecords.length - 2]
       : latestMetrics;
 
+    // Count total engagement records in date range
+    const totalEngagements = userEngagementRecords.length;
+
     // Aggregate totals across date range
     const totals = {
       totalUsers: 0,
@@ -188,6 +227,7 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
       totalRevenue: 0,
       totalImpressions: 0,
       totalClicks: 0,
+      totalEngagements,
     };
 
     appMetricsRecords.forEach((record) => {
@@ -250,6 +290,51 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
     });
     const avgSessionDuration = platformCount > 0 ? totalSessionDuration / platformCount : 0;
 
+    // Engagement breakdown (screen views and reward interactions)
+    const screenViewCounts: Record<string, number> = {};
+    const rewardInteractionCounts: Record<
+      string,
+      {
+        views: number;
+        clicks: number;
+      }
+    > = {};
+
+    userEngagementRecords.forEach((record) => {
+      const type = record.eventType || (record as any)?.metadata?.eventType;
+      const screenName = record.screenName || record.screensViewed?.[0] || (record as any)?.metadata?.screenName;
+      const rewardId = record.rewardId || record.rewardsViewed?.[0] || record.rewardsClicked?.[0] || (record as any)?.metadata?.rewardId;
+
+      if (type === 'screen_view' || type === 'page_view') {
+        const key = screenName || 'Unknown';
+        screenViewCounts[key] = (screenViewCounts[key] || 0) + 1;
+      }
+
+      if (type === 'reward_view') {
+        const key = rewardId || 'Unknown';
+        if (!rewardInteractionCounts[key]) {
+          rewardInteractionCounts[key] = { views: 0, clicks: 0 };
+        }
+        rewardInteractionCounts[key].views += 1;
+      }
+
+      if (type === 'reward_click') {
+        const key = rewardId || 'Unknown';
+        if (!rewardInteractionCounts[key]) {
+          rewardInteractionCounts[key] = { views: 0, clicks: 0 };
+        }
+        rewardInteractionCounts[key].clicks += 1;
+      }
+    });
+
+    const screenViewBreakdown = Object.entries(screenViewCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([screen, views]) => ({ screen, views }));
+
+    const rewardInteractionBreakdown = Object.entries(rewardInteractionCounts)
+      .sort((a, b) => (b[1].views + b[1].clicks) - (a[1].views + a[1].clicks))
+      .map(([rewardId, data]) => ({ rewardId, views: data.views, clicks: data.clicks }));
+
     // Build investor metrics response
     const investorMetrics = {
       // Overview Metrics
@@ -271,6 +356,7 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
       // Engagement Metrics
       engagement: {
         totalSessions: totals.totalSessions,
+        totalEngagements: totals.totalEngagements,
         avgSessionDuration: Math.round(avgSessionDuration),
         avgSessionsPerUser: latestMetrics.avgSessionsPerUser || 0,
         totalImpressions: totals.totalImpressions,
@@ -278,6 +364,8 @@ export const handler: Schema['getInvestorMetrics']['functionHandler'] = async (
         clickThroughRate: totals.totalImpressions > 0
           ? Math.round((totals.totalClicks / totals.totalImpressions) * 1000) / 10
           : 0,
+        screenViews: screenViewBreakdown,
+        rewardInteractions: rewardInteractionBreakdown,
       },
 
       // Revenue Metrics

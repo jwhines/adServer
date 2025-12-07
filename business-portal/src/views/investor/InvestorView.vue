@@ -1,8 +1,13 @@
 <template>
   <div class="investor-dashboard">
     <div class="page-header">
-      <h1>Investor Dashboard</h1>
-      <p class="subtitle">Growth metrics and platform performance</p>
+      <div class="header-top">
+        <div>
+          <h1>App Analytics</h1>
+          <p class="subtitle">Growth metrics and platform performance</p>
+        </div>
+        <EnvironmentBadge />
+      </div>
 
       <div class="actions">
         <DateRangePicker
@@ -19,13 +24,87 @@
       </div>
     </div>
 
+    <!-- Quick Navigation -->
+    <div class="quick-nav">
+      <h3>Quick Navigation</h3>
+      <div class="nav-sections">
+        <div class="nav-section">
+          <h4>Main Dashboards</h4>
+          <div class="nav-buttons">
+            <router-link to="/" class="nav-btn active">
+              <span class="icon">📊</span>
+              App Analytics
+            </router-link>
+            <router-link to="/analytics" class="nav-btn">
+              <span class="icon">📈</span>
+              Analytics
+            </router-link>
+            <router-link to="/admin" class="nav-btn">
+              <span class="icon">⚙️</span>
+              Admin Dashboard
+            </router-link>
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <h4>Business Management</h4>
+          <div class="nav-buttons">
+            <router-link to="/profile" class="nav-btn">
+              <span class="icon">👤</span>
+              Business Profile
+            </router-link>
+            <router-link to="/businesses" class="nav-btn">
+              <span class="icon">🏪</span>
+              Business List
+            </router-link>
+            <router-link to="/rewards" class="nav-btn">
+              <span class="icon">🎁</span>
+              Rewards Management
+            </router-link>
+            <router-link to="/rewards/new" class="nav-btn">
+              <span class="icon">➕</span>
+              Create New Reward
+            </router-link>
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <h4>Operations</h4>
+          <div class="nav-buttons">
+            <router-link to="/redemptions" class="nav-btn">
+              <span class="icon">🎫</span>
+              Redemptions
+            </router-link>
+            <router-link to="/verify" class="nav-btn">
+              <span class="icon">✅</span>
+              Verify Redemption
+            </router-link>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <LoadingSpinner v-if="loading" />
 
     <div v-else-if="error" class="error-message">
       {{ error }}
     </div>
 
-    <div v-else-if="metrics" class="metrics-container">
+    <div v-else-if="!metrics || !metrics.overview" class="empty-state">
+      <div class="empty-icon">📊</div>
+      <h2>No Analytics Data Yet</h2>
+      <p>Analytics will appear here once users start using the app.</p>
+      <p class="text-sm text-gray-500 mt-4">
+        Make sure the iOS app is tracking events with trackEngagement and trackAdEvent mutations.
+      </p>
+      <div class="mt-6">
+        <button @click="fetchMetrics" class="btn btn-primary">
+          Refresh Data
+        </button>
+      </div>
+    </div>
+
+    <div v-else-if="metrics && metrics.overview" class="metrics-container">
       <!-- Overview Cards -->
       <div class="metrics-section">
         <h2>Overview</h2>
@@ -85,9 +164,20 @@
         <h2>Engagement</h2>
         <div class="metric-cards">
           <MetricCard
+            title="Total Page Views"
+            :value="metrics.engagement.totalSessions.toLocaleString()"
+            :subtitle="`${metrics.engagement.avgSessionsPerUser.toFixed(1)} per user`"
+            icon="📄"
+          />
+          <MetricCard
+            title="Total Engagements"
+            :value="(metrics.engagement.totalEngagements || 0).toLocaleString()"
+            icon="🎯"
+          />
+          <MetricCard
             title="Total Sessions"
             :value="metrics.engagement.totalSessions.toLocaleString()"
-            icon="🎯"
+            icon="🔄"
           />
           <MetricCard
             title="Avg Session Duration"
@@ -104,6 +194,70 @@
             :value="metrics.engagement.totalImpressions.toLocaleString()"
             icon="👁️"
           />
+        </div>
+      </div>
+
+      <!-- View & Interaction Breakdown -->
+      <div class="metrics-section full-width">
+        <h2>View & Interaction Breakdown</h2>
+        <div class="breakdown-grid">
+          <div class="breakdown-card">
+            <div class="breakdown-header">
+              <div>
+                <h3>Screen Views</h3>
+                <p class="muted">Most viewed screens in the selected range</p>
+              </div>
+              <span class="pill">
+                {{ screenViewBreakdown.length }} screens
+              </span>
+            </div>
+            <div v-if="screenViewBreakdown.length" class="table">
+              <div class="table-head">
+                <span>Screen</span>
+                <span class="right">Views</span>
+              </div>
+              <div
+                v-for="screen in screenViewBreakdown"
+                :key="screen.screen"
+                class="table-row"
+              >
+                <span>{{ screen.screen }}</span>
+                <span class="right">{{ screen.views.toLocaleString() }}</span>
+              </div>
+            </div>
+            <div v-else class="empty-row">No screen views recorded</div>
+          </div>
+
+          <div class="breakdown-card">
+            <div class="breakdown-header">
+              <div>
+                <h3>Reward Interactions</h3>
+                <p class="muted">Reward cards viewed vs tapped</p>
+              </div>
+              <span class="pill">
+                {{ rewardInteractionBreakdown.length }} rewards
+              </span>
+            </div>
+            <div v-if="rewardInteractionBreakdown.length" class="table">
+              <div class="table-head three-col">
+                <span>Reward ID</span>
+                <span class="right">Views</span>
+                <span class="right">Taps</span>
+              </div>
+              <div
+                v-for="reward in rewardInteractionBreakdown"
+                :key="reward.rewardId"
+                class="table-row three-col"
+              >
+                <span class="truncate" :title="reward.rewardId">
+                  {{ reward.rewardId }}
+                </span>
+                <span class="right">{{ reward.views.toLocaleString() }}</span>
+                <span class="right">{{ reward.clicks.toLocaleString() }}</span>
+              </div>
+            </div>
+            <div v-else class="empty-row">No reward interactions recorded</div>
+          </div>
         </div>
       </div>
 
@@ -182,12 +336,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, watch, nextTick, computed } from 'vue';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify-config';
 import MetricCard from '../../components/analytics/MetricCard.vue';
 import DateRangePicker from '../../components/analytics/DateRangePicker.vue';
 import LoadingSpinner from '../../components/common/LoadingSpinner.vue';
+import EnvironmentBadge from '../../components/EnvironmentBadge.vue';
 import { Chart, registerables } from 'chart.js';
 
 Chart.register(...registerables);
@@ -198,6 +353,8 @@ const client = generateClient<Schema>();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const metrics = ref<any | null>(null);
+const screenViewBreakdown = computed(() => metrics.value?.engagement?.screenViews || []);
+const rewardInteractionBreakdown = computed(() => metrics.value?.engagement?.rewardInteractions || []);
 
 const dateRange = ref({
   startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -224,12 +381,26 @@ async function fetchMetrics() {
       endDate: dateRange.value.endDate,
     });
 
+    console.log('API Response:', result);
+
     if (result.data) {
-      metrics.value = result.data;
+      // Parse JSON string if needed (return type is AWSJSON)
+      let parsedData = result.data;
+      if (typeof result.data === 'string') {
+        parsedData = JSON.parse(result.data);
+      }
+
+      console.log('Parsed metrics:', parsedData);
+      metrics.value = parsedData;
+
       await nextTick();
       renderCharts();
     } else if (result.errors) {
       error.value = result.errors.map(e => e.message).join(', ');
+      console.error('API Errors:', result.errors);
+    } else {
+      error.value = 'No data returned from API';
+      console.error('No data or errors in response:', result);
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to fetch metrics';
@@ -519,6 +690,13 @@ watch(dateRange, () => {
   margin-bottom: 2rem;
 }
 
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
 .page-header h1 {
   font-size: 2rem;
   font-weight: bold;
@@ -562,6 +740,100 @@ watch(dateRange, () => {
   border: 1px solid #fecaca;
   border-radius: 0.5rem;
   color: #dc2626;
+}
+
+.empty-state {
+  padding: 4rem 2rem;
+  text-align: center;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.empty-state .empty-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.empty-state h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.quick-nav {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.quick-nav h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1rem;
+}
+
+.nav-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.nav-section h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+
+.nav-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  color: #374151;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.nav-btn:hover {
+  background: #f3f4f6;
+  border-color: #3b82f6;
+  color: #3b82f6;
+  transform: translateX(4px);
+}
+
+.nav-btn.active {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.nav-btn .icon {
+  font-size: 1.25rem;
 }
 
 .metrics-container {
@@ -652,6 +924,96 @@ watch(dateRange, () => {
   color: #374151;
   min-width: 3rem;
   text-align: right;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.breakdown-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.breakdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.pill {
+  background: #eef2ff;
+  color: #4338ca;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.table {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.table-head {
+  background: #f3f4f6;
+  font-weight: 600;
+  color: #374151;
+}
+
+.table-row:nth-child(even) {
+  background: #f9fafb;
+}
+
+.table-row {
+  align-items: center;
+  color: #111827;
+}
+
+.right {
+  text-align: right;
+}
+
+.three-col {
+  grid-template-columns: 1fr 90px 90px;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-row {
+  padding: 0.75rem;
+  color: #6b7280;
+  background: #f9fafb;
+  border: 1px dashed #e5e7eb;
+  border-radius: 0.375rem;
+  text-align: center;
 }
 
 .platform-chart {

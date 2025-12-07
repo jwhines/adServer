@@ -391,6 +391,9 @@ const schema = a.schema({
       duration: a.integer(), // seconds
 
       // Interaction Metrics
+      eventType: a.string(),
+      screenName: a.string(),
+      rewardId: a.string(),
       screensViewed: a.string().array(), // screen names
       rewardsViewed: a.string().array(), // reward IDs
       rewardsClicked: a.string().array(), // reward IDs

@@ -1,9 +1,7 @@
-import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   PutCommand,
-  UpdateCommand,
-  GetCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'crypto';
 
@@ -23,6 +21,16 @@ import { randomUUID } from 'crypto';
 
 const client = new DynamoDBClient({});
 const ddbDocClient = DynamoDBDocumentClient.from(client);
+
+type EventType =
+  | 'session_start'
+  | 'session_end'
+  | 'screen_view'
+  | 'page_view'
+  | 'reward_view'
+  | 'reward_click'
+  | 'search'
+  | 'filter';
 
 interface TrackEngagementArgs {
   eventType: string; // 'session_start' | 'session_end' | 'screen_view' | 'reward_view' | 'search' | etc.
@@ -46,33 +54,13 @@ interface TrackEngagementArgs {
   };
 }
 
-// Cache for table names
-let userEngagementTableName: string | null = null;
-let appMetricsTableName: string | null = null;
-let platformAnalyticsTableName: string | null = null;
+// Get table names from environment variables
+function getTableNames() {
+  const userEngagementTableName = process.env.USER_ENGAGEMENT_TABLE;
+  const appMetricsTableName = process.env.APP_METRICS_TABLE;
+  const platformAnalyticsTableName = process.env.PLATFORM_ANALYTICS_TABLE;
 
-async function discoverTableName(tablePrefix: string): Promise<string | null> {
-  try {
-    const listTablesResponse = await client.send(new ListTablesCommand({}));
-    const tables = listTablesResponse.TableNames || [];
-    const table = tables.find((t: string) => t.includes(tablePrefix));
-    return table || null;
-  } catch (error) {
-    console.error('Error discovering table:', error);
-    return null;
-  }
-}
-
-async function getTableNames() {
-  if (userEngagementTableName && appMetricsTableName && platformAnalyticsTableName) {
-    return { userEngagementTableName, appMetricsTableName, platformAnalyticsTableName };
-  }
-
-  userEngagementTableName = await discoverTableName('UserEngagement');
-  appMetricsTableName = await discoverTableName('AppMetrics');
-  platformAnalyticsTableName = await discoverTableName('PlatformAnalytics');
-
-  console.log(`📋 Discovered tables: UserEngagement=${userEngagementTableName}, AppMetrics=${appMetricsTableName}, PlatformAnalytics=${platformAnalyticsTableName}`);
+  console.log(`📋 Using tables: UserEngagement=${userEngagementTableName}, AppMetrics=${appMetricsTableName}, PlatformAnalytics=${platformAnalyticsTableName}`);
 
   return { userEngagementTableName, appMetricsTableName, platformAnalyticsTableName };
 }
@@ -83,10 +71,10 @@ export const handler = async (event: any) => {
   console.log('📊 Track engagement event:', args.eventType, args.userId);
 
   try {
-    const { userEngagementTableName: engagementTable, appMetricsTableName: metricsTable, platformAnalyticsTableName: platformTable } = await getTableNames();
+    const { userEngagementTableName: engagementTable, appMetricsTableName: metricsTable, platformAnalyticsTableName: platformTable } = getTableNames();
 
     if (!engagementTable || !metricsTable || !platformTable) {
-      throw new Error('Could not discover required DynamoDB tables');
+      throw new Error('Required DynamoDB table names not found in environment variables');
     }
 
     const today = new Date(args.timestamp).toISOString().split('T')[0];
@@ -143,14 +131,17 @@ export const handler = async (event: any) => {
 };
 
 /**
- * Handle session start event
+ * Build the common shape for engagement records
  */
-async function handleSessionStart(tableName: string, args: TrackEngagementArgs) {
+function buildEngagementItem(
+  args: TrackEngagementArgs,
+  eventType: EventType,
+  extra: Record<string, any> = {}
+) {
   const now = new Date().toISOString();
-  const engagementId = randomUUID();
 
-  const item = {
-    id: engagementId,
+  return {
+    id: randomUUID(),
     userId: args.userId,
     familyId: args.familyId,
     sessionId: args.sessionId,
@@ -158,6 +149,21 @@ async function handleSessionStart(tableName: string, args: TrackEngagementArgs) 
     deviceModel: args.deviceModel,
     osVersion: args.osVersion,
     appVersion: args.appVersion,
+    eventType,
+    sessionStart: args.timestamp, // required field; use event timestamp if session start not provided
+    createdAt: now,
+    updatedAt: now,
+    __typename: 'UserEngagement',
+    ...extra,
+  };
+}
+
+/**
+ * Handle session start event
+ */
+async function handleSessionStart(tableName: string, args: TrackEngagementArgs) {
+  const now = new Date().toISOString();
+  const item = buildEngagementItem(args, 'session_start', {
     sessionStart: args.timestamp,
     screensViewed: [],
     rewardsViewed: [],
@@ -165,10 +171,7 @@ async function handleSessionStart(tableName: string, args: TrackEngagementArgs) 
     searchesPerformed: 0,
     filtersUsed: [],
     metadata: args.metadata || {},
-    createdAt: now,
-    updatedAt: now,
-    __typename: 'UserEngagement',
-  };
+  });
 
   const command = new PutCommand({
     TableName: tableName,
@@ -189,25 +192,14 @@ async function handleSessionEnd(tableName: string, args: TrackEngagementArgs) {
 
   // For now, we'll create a new record for the session end
   // In production, you should update the existing session record
-  const now = new Date().toISOString();
-  const engagementId = randomUUID();
-
-  const item = {
-    id: engagementId,
-    userId: args.userId,
-    familyId: args.familyId,
-    sessionId: args.sessionId,
-    platform: args.platform,
+  const item = buildEngagementItem(args, 'session_end', {
     sessionEnd: args.timestamp,
     duration: sessionDuration,
     screensViewed: args.metadata?.screensViewed || [],
     rewardsViewed: args.metadata?.rewardsViewed || [],
     rewardsClicked: args.metadata?.rewardsClicked || [],
     metadata: args.metadata || {},
-    createdAt: now,
-    updatedAt: now,
-    __typename: 'UserEngagement',
-  };
+  });
 
   const command = new PutCommand({
     TableName: tableName,
@@ -222,40 +214,109 @@ async function handleSessionEnd(tableName: string, args: TrackEngagementArgs) {
  * Handle screen view event
  */
 async function handleScreenView(tableName: string, args: TrackEngagementArgs) {
-  console.log(`📱 Screen view: ${args.metadata?.screenName}`);
-  // In production, update the session record to add this screen to screensViewed array
+  const screenName = args.metadata?.screenName || 'unknown_screen';
+  const item = buildEngagementItem(args, 'screen_view', {
+    sessionStart: args.metadata?.sessionStart || args.timestamp,
+    screenName,
+    screensViewed: [screenName],
+    metadata: args.metadata || {},
+  });
+
+  const command = new PutCommand({
+    TableName: tableName,
+    Item: item,
+  });
+
+  await ddbDocClient.send(command);
+  console.log(`📱 Screen view recorded: ${screenName}`);
 }
 
 /**
  * Handle reward view event
  */
 async function handleRewardView(tableName: string, args: TrackEngagementArgs) {
-  console.log(`👀 Reward viewed: ${args.metadata?.rewardId}`);
-  // In production, update the session record to add this reward to rewardsViewed array
+  const rewardId = args.metadata?.rewardId || 'unknown_reward';
+  const item = buildEngagementItem(args, 'reward_view', {
+    sessionStart: args.metadata?.sessionStart || args.timestamp,
+    rewardId,
+    rewardsViewed: [rewardId],
+    metadata: args.metadata || {},
+  });
+
+  const command = new PutCommand({
+    TableName: tableName,
+    Item: item,
+  });
+
+  await ddbDocClient.send(command);
+  console.log(`👀 Reward viewed: ${rewardId}`);
 }
 
 /**
  * Handle reward click event
  */
 async function handleRewardClick(tableName: string, args: TrackEngagementArgs) {
-  console.log(`👆 Reward clicked: ${args.metadata?.rewardId}`);
-  // In production, update the session record to add this reward to rewardsClicked array
+  const rewardId = args.metadata?.rewardId || 'unknown_reward';
+  const item = buildEngagementItem(args, 'reward_click', {
+    sessionStart: args.metadata?.sessionStart || args.timestamp,
+    rewardId,
+    rewardsClicked: [rewardId],
+    metadata: args.metadata || {},
+  });
+
+  const command = new PutCommand({
+    TableName: tableName,
+    Item: item,
+  });
+
+  await ddbDocClient.send(command);
+  console.log(`👆 Reward clicked: ${rewardId}`);
 }
 
 /**
  * Handle search event
  */
 async function handleSearch(tableName: string, args: TrackEngagementArgs) {
-  console.log(`🔍 Search performed: ${args.metadata?.searchQuery}`);
-  // In production, increment searchesPerformed counter
+  const searchQuery = args.metadata?.searchQuery || '';
+  const item = buildEngagementItem(args, 'search', {
+    sessionStart: args.metadata?.sessionStart || args.timestamp,
+    searchesPerformed: 1,
+    metadata: {
+      ...args.metadata,
+      searchQuery,
+    },
+  });
+
+  const command = new PutCommand({
+    TableName: tableName,
+    Item: item,
+  });
+
+  await ddbDocClient.send(command);
+  console.log(`🔍 Search recorded: ${searchQuery}`);
 }
 
 /**
  * Handle filter event
  */
 async function handleFilter(tableName: string, args: TrackEngagementArgs) {
-  console.log(`🎯 Filter applied: ${args.metadata?.filterType}`);
-  // In production, add filter to filtersUsed array
+  const filterType = args.metadata?.filterType || 'unknown_filter';
+  const item = buildEngagementItem(args, 'filter', {
+    sessionStart: args.metadata?.sessionStart || args.timestamp,
+    filtersUsed: [filterType],
+    metadata: {
+      ...args.metadata,
+      filterType,
+    },
+  });
+
+  const command = new PutCommand({
+    TableName: tableName,
+    Item: item,
+  });
+
+  await ddbDocClient.send(command);
+  console.log(`🎯 Filter applied: ${filterType}`);
 }
 
 /**

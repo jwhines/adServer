@@ -2,6 +2,8 @@
 import { ref } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import EnvironmentBadge from '@/components/EnvironmentBadge.vue';
+import EnvironmentSwitcher from '@/components/EnvironmentSwitcher.vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -9,7 +11,7 @@ const route = useRoute();
 const mobileMenuOpen = ref(false);
 
 const navigation = [
-  { name: 'Dashboard', path: '/', icon: '📊' },
+  { name: 'App Analytics', path: '/', icon: '📊' },
   { name: 'Business Profile', path: '/profile', icon: '🏢' },
   { name: 'Rewards', path: '/rewards', icon: '🎁' },
   { name: 'Analytics', path: '/analytics', icon: '📈' },
@@ -80,6 +82,8 @@ const isActive = (path: string) => {
 
           <!-- User Menu -->
           <div class="flex items-center space-x-4">
+            <EnvironmentSwitcher />
+            <EnvironmentBadge />
             <span class="text-sm text-gray-600 hidden sm:block">
               {{ authStore.user?.email }}
             </span>

@@ -2,458 +2,566 @@
 /**
  * BusinessApprovalsView
  *
- * Manage business approval workflow:
- * - Pending approvals queue
- * - Business details review
- * - Approve/Reject actions with reason
- * - Approved businesses list
- * - Revoke approval option
+ * Manage business approval workflow using real Business table data:
+ * - Query businesses from DynamoDB
+ * - Approve/Reject with mutations
+ * - Real-time status updates
  */
 
 import { ref, computed, onMounted } from 'vue';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '@/amplify-config';
 import Card from '@/components/common/Card.vue';
 import Button from '@/components/common/Button.vue';
 import Badge from '@/components/common/Badge.vue';
 import Modal from '@/components/common/Modal.vue';
 import Input from '@/components/common/Input.vue';
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue';
+import EnvironmentBadge from '@/components/EnvironmentBadge.vue';
+
+const client = generateClient<Schema>();
 
 // State
-const loading = ref(false);
+const loading = ref(true);
+const error = ref<string | null>(null);
+const businesses = ref<any[]>([]);
 const selectedBusiness = ref<any>(null);
 const showApproveModal = ref(false);
 const showRejectModal = ref(false);
 const rejectionReason = ref('');
 const activeTab = ref<'pending' | 'approved' | 'rejected'>('pending');
+const processingAction = ref(false);
 
-// Mock businesses data
-const businesses = ref([
-  {
-    id: '1',
-    name: 'Durham Bowling Alley',
-    email: 'info@durhambowling.com',
-    phone: '(919) 555-0123',
-    address: '123 Main St',
-    city: 'Durham',
-    state: 'NC',
-    zipCode: '27701',
-    businessType: 'ENTERTAINMENT',
-    description: 'Family-friendly bowling alley with arcade and food service',
-    website: 'https://durhambowling.com',
-    verificationStatus: 'PENDING',
-    createdAt: '2024-10-07T09:30:00Z',
-  },
-  {
-    id: '2',
-    name: 'Kids Science Museum',
-    email: 'admin@kidsscience.org',
-    phone: '(919) 555-0124',
-    address: '456 Science Dr',
-    city: 'Durham',
-    state: 'NC',
-    zipCode: '27705',
-    businessType: 'EDUCATION',
-    description: 'Interactive science museum for children ages 5-15',
-    website: 'https://kidsscience.org',
-    verificationStatus: 'PENDING',
-    createdAt: '2024-10-06T14:20:00Z',
-  },
-  {
-    id: '3',
-    name: 'Trampoline Park',
-    email: 'contact@trampolinepark.com',
-    phone: '(919) 555-0125',
-    address: '789 Jump Ln',
-    city: 'Durham',
-    state: 'NC',
-    zipCode: '27713',
-    businessType: 'SPORTS_RECREATION',
-    description: 'Indoor trampoline park with dodgeball and foam pits',
-    website: 'https://trampolinepark.com',
-    verificationStatus: 'APPROVED',
-    createdAt: '2024-10-05T11:15:00Z',
-  },
-  {
-    id: '4',
-    name: 'Book Cafe',
-    email: 'hello@bookcafe.com',
-    phone: '(919) 555-0126',
-    address: '321 Reading Rd',
-    city: 'Durham',
-    state: 'NC',
-    zipCode: '27707',
-    businessType: 'RETAIL',
-    description: 'Bookstore with cafe and reading areas',
-    website: 'https://bookcafe.com',
-    verificationStatus: 'APPROVED',
-    createdAt: '2024-10-04T16:45:00Z',
-  },
-  {
-    id: '5',
-    name: 'Fake Business Inc',
-    email: 'spam@fake.com',
-    phone: '(000) 000-0000',
-    address: '000 Fake St',
-    city: 'Durham',
-    state: 'NC',
-    zipCode: '00000',
-    businessType: 'OTHER',
-    description: 'Suspicious business',
-    verificationStatus: 'REJECTED',
-    rejectionReason: 'Incomplete information and suspicious details',
-    createdAt: '2024-10-03T10:00:00Z',
-  },
-]);
-
-// Filtered businesses
-const filteredBusinesses = computed(() => {
-  return businesses.value.filter((b) => b.verificationStatus === activeTab.value.toUpperCase());
+onMounted(async () => {
+  await fetchBusinesses();
 });
 
-// Format date
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
-
-// View business details
-const viewDetails = (business: any) => {
-  selectedBusiness.value = business;
-  if (business.verificationStatus === 'PENDING') {
-    showApproveModal.value = true;
-  }
-};
-
-// Approve business
-const approveBusiness = async () => {
-  if (!selectedBusiness.value) return;
-
-  try {
-    // TODO: Update business in DynamoDB
-    // await client.models.Business.update({
-    //   id: selectedBusiness.value.id,
-    //   verificationStatus: 'APPROVED',
-    //   isVerified: true,
-    // });
-
-    // Update local state
-    const index = businesses.value.findIndex((b) => b.id === selectedBusiness.value.id);
-    if (index !== -1) {
-      businesses.value[index].verificationStatus = 'APPROVED';
-    }
-
-    showApproveModal.value = false;
-    selectedBusiness.value = null;
-  } catch (error) {
-    console.error('Error approving business:', error);
-  }
-};
-
-// Reject business
-const rejectBusiness = async () => {
-  if (!selectedBusiness.value || !rejectionReason.value) return;
-
-  try {
-    // TODO: Update business in DynamoDB
-    // await client.models.Business.update({
-    //   id: selectedBusiness.value.id,
-    //   verificationStatus: 'REJECTED',
-    //   isVerified: false,
-    //   rejectionReason: rejectionReason.value,
-    // });
-
-    // Update local state
-    const index = businesses.value.findIndex((b) => b.id === selectedBusiness.value.id);
-    if (index !== -1) {
-      businesses.value[index].verificationStatus = 'REJECTED';
-      businesses.value[index].rejectionReason = rejectionReason.value;
-    }
-
-    showRejectModal.value = false;
-    showApproveModal.value = false;
-    selectedBusiness.value = null;
-    rejectionReason.value = '';
-  } catch (error) {
-    console.error('Error rejecting business:', error);
-  }
-};
-
-// Open reject modal
-const openRejectModal = () => {
-  showApproveModal.value = false;
-  showRejectModal.value = true;
-};
-
-// Fetch businesses
-const fetchBusinesses = async () => {
+async function fetchBusinesses() {
   loading.value = true;
+  error.value = null;
+
   try {
-    // TODO: Fetch from DynamoDB
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  } catch (error) {
-    console.error('Error fetching businesses:', error);
+    const result = await client.models.Business.list();
+
+    if (result.data) {
+      businesses.value = result.data;
+    }
+  } catch (err) {
+    console.error('Error fetching businesses:', err);
+    error.value = err instanceof Error ? err.message : 'Failed to load businesses';
   } finally {
     loading.value = false;
   }
-};
+}
 
-onMounted(() => {
-  fetchBusinesses();
-});
+// Filtered lists
+const pendingBusinesses = computed(() =>
+  businesses.value.filter(b => b.verificationStatus === 'PENDING')
+);
+
+const approvedBusinesses = computed(() =>
+  businesses.value.filter(b => b.verificationStatus === 'APPROVED')
+);
+
+const rejectedBusinesses = computed(() =>
+  businesses.value.filter(b => b.verificationStatus === 'REJECTED')
+);
+
+// Actions
+function openApproveModal(business: any) {
+  selectedBusiness.value = business;
+  showApproveModal.value = true;
+}
+
+function openRejectModal(business: any) {
+  selectedBusiness.value = business;
+  rejectionReason.value = '';
+  showRejectModal.value = true;
+}
+
+async function approveBusiness() {
+  if (!selectedBusiness.value) return;
+
+  processingAction.value = true;
+  try {
+    await client.models.Business.update({
+      id: selectedBusiness.value.id,
+      verificationStatus: 'APPROVED',
+      isVerified: true,
+    });
+
+    await fetchBusinesses();
+    showApproveModal.value = false;
+    selectedBusiness.value = null;
+  } catch (err) {
+    console.error('Error approving business:', err);
+    alert('Failed to approve business. Please try again.');
+  } finally {
+    processingAction.value = false;
+  }
+}
+
+async function rejectBusiness() {
+  if (!selectedBusiness.value || !rejectionReason.value.trim()) {
+    alert('Please provide a rejection reason');
+    return;
+  }
+
+  processingAction.value = true;
+  try {
+    await client.models.Business.update({
+      id: selectedBusiness.value.id,
+      verificationStatus: 'REJECTED',
+      isVerified: false,
+      rejectionReason: rejectionReason.value.trim(),
+    });
+
+    await fetchBusinesses();
+    showRejectModal.value = false;
+    selectedBusiness.value = null;
+    rejectionReason.value = '';
+  } catch (err) {
+    console.error('Error rejecting business:', err);
+    alert('Failed to reject business. Please try again.');
+  } finally {
+    processingAction.value = false;
+  }
+}
+
+async function revokeApproval(business: any) {
+  if (!confirm(`Are you sure you want to revoke approval for "${business.name}"?`)) {
+    return;
+  }
+
+  try {
+    await client.models.Business.update({
+      id: business.id,
+      verificationStatus: 'PENDING',
+      isVerified: false,
+    });
+
+    await fetchBusinesses();
+  } catch (err) {
+    console.error('Error revoking approval:', err);
+    alert('Failed to revoke approval. Please try again.');
+  }
+}
+
+function formatDate(dateString: string) {
+  if (!dateString) return 'N/A';
+  return new Date(dateString).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function getStatusColor(status: string) {
+  switch (status) {
+    case 'APPROVED': return 'success';
+    case 'PENDING': return 'warning';
+    case 'REJECTED': return 'danger';
+    default: return 'default';
+  }
+}
 </script>
 
 <template>
-  <div class="container mx-auto px-4 py-8">
-    <!-- Header -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-900">Business Approvals</h1>
-      <p class="mt-2 text-gray-600">
-        Review and approve new business registrations
-      </p>
+  <div class="business-approvals">
+    <div class="header">
+      <div>
+        <h1>Business Approvals</h1>
+        <p class="subtitle">Review and manage business applications</p>
+      </div>
+      <EnvironmentBadge />
     </div>
 
     <!-- Tabs -->
-    <div class="mb-6">
-      <div class="border-b border-gray-200">
-        <nav class="-mb-px flex space-x-8">
-          <button
-            :class="[
-              'py-4 px-1 border-b-2 font-medium text-sm transition-colors',
-              activeTab === 'pending'
-                ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300',
-            ]"
-            @click="activeTab = 'pending'"
-          >
-            Pending
-            <Badge variant="warning" class="ml-2">
-              {{ businesses.filter((b) => b.verificationStatus === 'PENDING').length }}
-            </Badge>
-          </button>
-          <button
-            :class="[
-              'py-4 px-1 border-b-2 font-medium text-sm transition-colors',
-              activeTab === 'approved'
-                ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300',
-            ]"
-            @click="activeTab = 'approved'"
-          >
-            Approved
-            <Badge variant="success" class="ml-2">
-              {{ businesses.filter((b) => b.verificationStatus === 'APPROVED').length }}
-            </Badge>
-          </button>
-          <button
-            :class="[
-              'py-4 px-1 border-b-2 font-medium text-sm transition-colors',
-              activeTab === 'rejected'
-                ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300',
-            ]"
-            @click="activeTab = 'rejected'"
-          >
-            Rejected
-            <Badge variant="danger" class="ml-2">
-              {{ businesses.filter((b) => b.verificationStatus === 'REJECTED').length }}
-            </Badge>
-          </button>
-        </nav>
-      </div>
-    </div>
-
-    <!-- Loading State -->
-    <div v-if="loading" class="flex justify-center py-12">
-      <LoadingSpinner size="lg" text="Loading businesses..." />
-    </div>
-
-    <!-- Businesses List -->
-    <div v-else class="space-y-4">
-      <Card
-        v-for="business in filteredBusinesses"
-        :key="business.id"
-        padding
+    <div class="tabs">
+      <button
+        :class="['tab', { active: activeTab === 'pending' }]"
+        @click="activeTab = 'pending'"
       >
-        <div class="flex items-start justify-between">
-          <div class="flex-1">
-            <!-- Business Name & Badge -->
-            <div class="flex items-center gap-3 mb-3">
-              <h3 class="text-xl font-semibold text-gray-900">{{ business.name }}</h3>
-              <Badge
-                :variant="
-                  business.verificationStatus === 'PENDING'
-                    ? 'warning'
-                    : business.verificationStatus === 'APPROVED'
-                    ? 'success'
-                    : 'danger'
-                "
-              >
-                {{ business.verificationStatus }}
-              </Badge>
+        Pending ({{ pendingBusinesses.length }})
+      </button>
+      <button
+        :class="['tab', { active: activeTab === 'approved' }]"
+        @click="activeTab = 'approved'"
+      >
+        Approved ({{ approvedBusinesses.length }})
+      </button>
+      <button
+        :class="['tab', { active: activeTab === 'rejected' }]"
+        @click="activeTab = 'rejected'"
+      >
+        Rejected ({{ rejectedBusinesses.length }})
+      </button>
+    </div>
+
+    <LoadingSpinner v-if="loading" />
+
+    <div v-else-if="error" class="error-message">
+      {{ error }}
+      <button @click="fetchBusinesses" class="retry-btn">Retry</button>
+    </div>
+
+    <div v-else class="content">
+      <!-- Pending Tab -->
+      <div v-if="activeTab === 'pending'">
+        <Card v-if="pendingBusinesses.length === 0" class="empty-card">
+          <p>✅ No pending business approvals!</p>
+        </Card>
+        <div v-else class="business-list">
+          <Card v-for="business in pendingBusinesses" :key="business.id" class="business-card">
+            <div class="business-header">
+              <div>
+                <h3>{{ business.name }}</h3>
+                <Badge :variant="getStatusColor(business.verificationStatus)">
+                  {{ business.verificationStatus }}
+                </Badge>
+              </div>
+              <span class="date">{{ formatDate(business.createdAt) }}</span>
             </div>
 
-            <!-- Business Details -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <p class="text-gray-600">Email</p>
-                <p class="font-medium text-gray-900">{{ business.email }}</p>
+            <div class="business-details">
+              <div class="detail-row">
+                <strong>Type:</strong> {{ business.businessType || 'N/A' }}
               </div>
-              <div>
-                <p class="text-gray-600">Phone</p>
-                <p class="font-medium text-gray-900">{{ business.phone }}</p>
+              <div class="detail-row">
+                <strong>Email:</strong> {{ business.email }}
               </div>
-              <div>
-                <p class="text-gray-600">Address</p>
-                <p class="font-medium text-gray-900">
-                  {{ business.address }}, {{ business.city }}, {{ business.state }} {{ business.zipCode }}
-                </p>
+              <div class="detail-row">
+                <strong>Phone:</strong> {{ business.phone || 'N/A' }}
               </div>
-              <div>
-                <p class="text-gray-600">Type</p>
-                <p class="font-medium text-gray-900">{{ business.businessType }}</p>
+              <div class="detail-row">
+                <strong>Address:</strong>
+                {{ business.address }}, {{ business.city }}, {{ business.state }} {{ business.zipCode }}
               </div>
-              <div class="md:col-span-2">
-                <p class="text-gray-600">Description</p>
-                <p class="font-medium text-gray-900">{{ business.description }}</p>
+              <div class="detail-row" v-if="business.description">
+                <strong>Description:</strong> {{ business.description }}
               </div>
-              <div v-if="business.website">
-                <p class="text-gray-600">Website</p>
-                <a
-                  :href="business.website"
-                  target="_blank"
-                  class="font-medium text-primary-600 hover:underline"
-                >
-                  {{ business.website }}
-                </a>
-              </div>
-              <div>
-                <p class="text-gray-600">Submitted</p>
-                <p class="font-medium text-gray-900">{{ formatDate(business.createdAt) }}</p>
-              </div>
-              <div v-if="business.rejectionReason" class="md:col-span-2">
-                <p class="text-gray-600">Rejection Reason</p>
-                <p class="font-medium text-red-600">{{ business.rejectionReason }}</p>
+              <div class="detail-row" v-if="business.website">
+                <strong>Website:</strong>
+                <a :href="business.website" target="_blank" class="link">{{ business.website }}</a>
               </div>
             </div>
-          </div>
 
-          <!-- Actions -->
-          <div v-if="business.verificationStatus === 'PENDING'" class="ml-6">
-            <Button variant="primary" @click="viewDetails(business)">
-              Review
-            </Button>
-          </div>
+            <div class="actions">
+              <Button variant="success" @click="openApproveModal(business)">
+                ✅ Approve
+              </Button>
+              <Button variant="danger" @click="openRejectModal(business)">
+                ❌ Reject
+              </Button>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </div>
 
-      <!-- Empty State -->
-      <div v-if="filteredBusinesses.length === 0" class="text-center py-12">
-        <p class="text-gray-500">No {{ activeTab }} businesses</p>
+      <!-- Approved Tab -->
+      <div v-if="activeTab === 'approved'">
+        <Card v-if="approvedBusinesses.length === 0" class="empty-card">
+          <p>No approved businesses yet.</p>
+        </Card>
+        <div v-else class="business-list">
+          <Card v-for="business in approvedBusinesses" :key="business.id" class="business-card">
+            <div class="business-header">
+              <div>
+                <h3>{{ business.name }}</h3>
+                <Badge variant="success">APPROVED</Badge>
+              </div>
+              <span class="date">Approved {{ formatDate(business.updatedAt || business.createdAt) }}</span>
+            </div>
+
+            <div class="business-details">
+              <div class="detail-row">
+                <strong>Email:</strong> {{ business.email }}
+              </div>
+              <div class="detail-row">
+                <strong>Location:</strong>
+                {{ business.city }}, {{ business.state }}
+              </div>
+            </div>
+
+            <div class="actions">
+              <Button variant="secondary" @click="revokeApproval(business)">
+                Revoke Approval
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <!-- Rejected Tab -->
+      <div v-if="activeTab === 'rejected'">
+        <Card v-if="rejectedBusinesses.length === 0" class="empty-card">
+          <p>No rejected businesses.</p>
+        </Card>
+        <div v-else class="business-list">
+          <Card v-for="business in rejectedBusinesses" :key="business.id" class="business-card">
+            <div class="business-header">
+              <div>
+                <h3>{{ business.name }}</h3>
+                <Badge variant="danger">REJECTED</Badge>
+              </div>
+              <span class="date">{{ formatDate(business.updatedAt || business.createdAt) }}</span>
+            </div>
+
+            <div class="business-details">
+              <div class="detail-row">
+                <strong>Email:</strong> {{ business.email }}
+              </div>
+              <div class="detail-row rejection-reason" v-if="business.rejectionReason">
+                <strong>Rejection Reason:</strong> {{ business.rejectionReason }}
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
 
-    <!-- Approve/Review Modal -->
-    <Modal
-      :show="showApproveModal"
-      title="Review Business"
-      size="xl"
-      @close="showApproveModal = false"
-    >
-      <div v-if="selectedBusiness" class="space-y-4">
-        <div class="p-4 bg-blue-50 rounded-lg">
-          <h4 class="font-semibold text-gray-900 mb-3">{{ selectedBusiness.name }}</h4>
-          <div class="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <span class="text-gray-600">Email:</span>
-              <span class="ml-2 font-medium">{{ selectedBusiness.email }}</span>
-            </div>
-            <div>
-              <span class="text-gray-600">Phone:</span>
-              <span class="ml-2 font-medium">{{ selectedBusiness.phone }}</span>
-            </div>
-            <div class="col-span-2">
-              <span class="text-gray-600">Address:</span>
-              <span class="ml-2 font-medium">
-                {{ selectedBusiness.address }}, {{ selectedBusiness.city }}, {{ selectedBusiness.state }}
-                {{ selectedBusiness.zipCode }}
-              </span>
-            </div>
-            <div>
-              <span class="text-gray-600">Type:</span>
-              <span class="ml-2 font-medium">{{ selectedBusiness.businessType }}</span>
-            </div>
-            <div v-if="selectedBusiness.website">
-              <span class="text-gray-600">Website:</span>
-              <a
-                :href="selectedBusiness.website"
-                target="_blank"
-                class="ml-2 font-medium text-primary-600 hover:underline"
-              >
-                Visit
-              </a>
-            </div>
-          </div>
-        </div>
+    <!-- Approve Modal -->
+    <Modal v-model="showApproveModal" title="Approve Business">
+      <div v-if="selectedBusiness" class="modal-content">
+        <p>Are you sure you want to approve <strong>{{ selectedBusiness.name }}</strong>?</p>
+        <p class="text-sm text-gray-600">This will allow them to create reward campaigns.</p>
 
-        <div class="p-4 bg-gray-50 rounded-lg">
-          <p class="text-sm text-gray-600">Description</p>
-          <p class="mt-1 text-gray-900">{{ selectedBusiness.description }}</p>
+        <div class="modal-actions">
+          <Button variant="secondary" @click="showApproveModal = false" :disabled="processingAction">
+            Cancel
+          </Button>
+          <Button variant="success" @click="approveBusiness" :disabled="processingAction">
+            {{ processingAction ? 'Approving...' : 'Confirm Approval' }}
+          </Button>
         </div>
       </div>
-
-      <template #footer>
-        <Button variant="secondary" @click="showApproveModal = false">
-          Cancel
-        </Button>
-        <Button variant="danger" @click="openRejectModal">
-          Reject
-        </Button>
-        <Button variant="success" @click="approveBusiness">
-          Approve Business
-        </Button>
-      </template>
     </Modal>
 
     <!-- Reject Modal -->
-    <Modal
-      :show="showRejectModal"
-      title="Reject Business"
-      size="md"
-      @close="showRejectModal = false"
-    >
-      <div class="space-y-4">
-        <p class="text-gray-700">
-          Please provide a reason for rejecting
-          <strong>{{ selectedBusiness?.name }}</strong>:
-        </p>
+    <Modal v-model="showRejectModal" title="Reject Business">
+      <div v-if="selectedBusiness" class="modal-content">
+        <p>Rejecting <strong>{{ selectedBusiness.name }}</strong></p>
 
-        <Input
-          v-model="rejectionReason"
-          label="Rejection Reason"
-          type="text"
-          placeholder="e.g., Incomplete information, unable to verify..."
-          required
-        />
+        <div class="form-group">
+          <label for="rejection-reason">Reason for Rejection *</label>
+          <textarea
+            id="rejection-reason"
+            v-model="rejectionReason"
+            class="textarea"
+            rows="4"
+            placeholder="Please provide a detailed reason for rejection..."
+            :disabled="processingAction"
+          ></textarea>
+        </div>
+
+        <div class="modal-actions">
+          <Button variant="secondary" @click="showRejectModal = false" :disabled="processingAction">
+            Cancel
+          </Button>
+          <Button variant="danger" @click="rejectBusiness" :disabled="processingAction || !rejectionReason.trim()">
+            {{ processingAction ? 'Rejecting...' : 'Confirm Rejection' }}
+          </Button>
+        </div>
       </div>
-
-      <template #footer>
-        <Button variant="secondary" @click="showRejectModal = false">
-          Cancel
-        </Button>
-        <Button
-          variant="danger"
-          :disabled="!rejectionReason"
-          @click="rejectBusiness"
-        >
-          Confirm Rejection
-        </Button>
-      </template>
     </Modal>
   </div>
 </template>
+
+<style scoped>
+.business-approvals {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.tab {
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #6b7280;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: -2px;
+}
+
+.tab:hover {
+  color: #1f2937;
+}
+
+.tab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+}
+
+.error-message {
+  padding: 2rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  text-align: center;
+}
+
+.retry-btn {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.empty-card {
+  padding: 3rem 2rem;
+  text-align: center;
+  color: #6b7280;
+  font-size: 1.125rem;
+}
+
+.business-list {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.business-card {
+  padding: 1.5rem;
+}
+
+.business-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.business-header h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.date {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.business-details {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.detail-row {
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.detail-row strong {
+  color: #1f2937;
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.rejection-reason {
+  padding: 0.75rem;
+  background: #fef2f2;
+  border-radius: 0.375rem;
+  color: #dc2626;
+}
+
+.link {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.modal-content {
+  padding: 1rem 0;
+}
+
+.modal-content p {
+  margin-bottom: 1rem;
+  color: #374151;
+}
+
+.form-group {
+  margin: 1.5rem 0;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.5rem;
+}
+
+.textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  ring: 2px solid rgba(59, 130, 246, 0.1);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+}
+
+.text-gray-600 {
+  color: #6b7280;
+}
+</style>

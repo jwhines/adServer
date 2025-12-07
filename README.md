@@ -2,6 +2,26 @@
 
 AWS Amplify Gen 2 backend + Vue.js business portal for a direct-sold local advertising platform where Durham, NC businesses create reward offers that families can redeem with earned points.
 
+## 📚 Documentation
+
+**Complete documentation is available:**
+
+- **[Documentation Index](./docs/INDEX.md)** - Complete documentation index and quick links
+- **[Analytics Tracking Guide](./docs/ANALYTICS_TRACKING_GUIDE.md)** - ⭐ **START HERE** for analytics integration
+  - Complete tracking system overview
+  - iOS/tvOS integration examples
+  - Lambda function documentation
+  - Troubleshooting & recent fixes
+- **[Architecture](./ARCHITECTURE.md)** - System architecture and diagrams
+- **[Project Status](./PROJECT_STATUS.md)** - Current implementation status
+- **[Troubleshooting](./TROUBLESHOOTING.md)** - Common issues and solutions
+
+**Quick Links:**
+- Setting up analytics tracking? → [Analytics Tracking Guide](./docs/ANALYTICS_TRACKING_GUIDE.md)
+- Deploying the backend? → [Quick Start](#-quick-start) (below)
+- Understanding the system? → [Architecture](./ARCHITECTURE.md)
+- Troubleshooting? → [Troubleshooting Guide](./TROUBLESHOOTING.md)
+
 ## 🏗️ Project Structure
 
 ```

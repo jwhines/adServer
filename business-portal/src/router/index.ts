@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: '',
         name: 'Dashboard',
+        component: () => import('@/views/investor/InvestorView.vue'),
+        meta: { requiresAdmin: true },
+      },
+      {
+        path: 'old-dashboard',
+        name: 'OldDashboard',
         component: () => import('@/views/dashboard/DashboardView.vue'),
       },
       {
@@ -70,12 +76,6 @@ const routes: RouteRecordRaw[] = [
         path: 'analytics',
         name: 'Analytics',
         component: () => import('@/views/analytics/AnalyticsView.vue'),
-      },
-      {
-        path: 'investor',
-        name: 'Investor',
-        component: () => import('@/views/investor/InvestorView.vue'),
-        meta: { requiresAdmin: true },
       },
       {
         path: 'redemptions',

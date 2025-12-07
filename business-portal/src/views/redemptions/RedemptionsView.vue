@@ -2,16 +2,17 @@
 /**
  * RedemptionsView
  *
- * Manage reward redemptions with:
+ * Manage reward redemptions using real RewardRedemption table data:
+ * - Query redemptions from DynamoDB
  * - Filter by status, date, search
- * - Redemptions table
- * - Details modal with QR code
- * - Mark as redeemed functionality
+ * - Update redemption status
+ * - Display QR codes for verification
  */
 
 import { ref, computed, onMounted } from 'vue';
 import QRCode from 'qrcode';
-import { useRewardsStore } from '@/stores/rewards';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '@/amplify-config';
 import Card from '@/components/common/Card.vue';
 import Button from '@/components/common/Button.vue';
 import Badge from '@/components/common/Badge.vue';
@@ -19,11 +20,13 @@ import Modal from '@/components/common/Modal.vue';
 import Input from '@/components/common/Input.vue';
 import Select from '@/components/common/Select.vue';
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue';
+import EnvironmentBadge from '@/components/EnvironmentBadge.vue';
 
-const rewardsStore = useRewardsStore();
+const client = generateClient<Schema>();
 
 // State
-const loading = ref(false);
+const loading = ref(true);
+const error = ref<string | null>(null);
 const searchQuery = ref('');
 const statusFilter = ref('');
 const startDate = ref('');
@@ -31,6 +34,7 @@ const endDate = ref('');
 const selectedRedemption = ref<any>(null);
 const showDetailsModal = ref(false);
 const qrCodeUrl = ref('');
+const processingAction = ref(false);
 
 // Status options
 const statusOptions = [
@@ -42,66 +46,9 @@ const statusOptions = [
   { label: 'Cancelled', value: 'CANCELLED' },
 ];
 
-// Mock redemptions data
-const redemptions = ref([
-  {
-    id: '1',
-    redemptionCode: 'ABC12345',
-    rewardTitle: 'Free Ice Cream Cone',
-    familyId: 'family-123',
-    childId: 'child-456',
-    childAge: 8,
-    redemptionStatus: 'PENDING',
-    redemptionDate: '2024-10-05T14:30:00Z',
-    expiresAt: '2024-10-12T14:30:00Z',
-    redemptionCity: 'Durham',
-    redemptionZip: '27707',
-    pointsSpent: 500,
-  },
-  {
-    id: '2',
-    redemptionCode: 'DEF67890',
-    rewardTitle: 'Mini Golf Pass',
-    familyId: 'family-789',
-    childId: 'child-012',
-    childAge: 12,
-    redemptionStatus: 'REDEEMED',
-    redemptionDate: '2024-10-04T10:15:00Z',
-    expiresAt: '2024-10-11T10:15:00Z',
-    fulfilledAt: '2024-10-05T16:20:00Z',
-    redemptionCity: 'Durham',
-    redemptionZip: '27701',
-    pointsSpent: 750,
-  },
-  {
-    id: '3',
-    redemptionCode: 'GHI34567',
-    rewardTitle: 'Pizza Slice',
-    familyId: 'family-234',
-    childId: 'child-567',
-    childAge: 10,
-    redemptionStatus: 'PENDING',
-    redemptionDate: '2024-10-06T18:45:00Z',
-    expiresAt: '2024-10-13T18:45:00Z',
-    redemptionCity: 'Durham',
-    redemptionZip: '27705',
-    pointsSpent: 300,
-  },
-  {
-    id: '4',
-    redemptionCode: 'JKL89012',
-    rewardTitle: 'Movie Ticket',
-    familyId: 'family-567',
-    childId: 'child-890',
-    childAge: 15,
-    redemptionStatus: 'EXPIRED',
-    redemptionDate: '2024-09-28T12:00:00Z',
-    expiresAt: '2024-10-05T12:00:00Z',
-    redemptionCity: 'Durham',
-    redemptionZip: '27713',
-    pointsSpent: 1000,
-  },
-]);
+// Real redemptions data from DynamoDB
+const redemptions = ref<any[]>([]);
+const rewards = ref<Map<string, any>>(new Map());
 
 // Filtered redemptions
 const filteredRedemptions = computed(() => {
@@ -114,9 +61,10 @@ const filteredRedemptions = computed(() => {
     // Search filter
     if (searchQuery.value) {
       const query = searchQuery.value.toLowerCase();
+      const rewardTitle = getRewardTitle(redemption.rewardId);
       return (
         redemption.redemptionCode.toLowerCase().includes(query) ||
-        redemption.rewardTitle.toLowerCase().includes(query) ||
+        rewardTitle.toLowerCase().includes(query) ||
         redemption.familyId.toLowerCase().includes(query)
       );
     }
@@ -124,6 +72,12 @@ const filteredRedemptions = computed(() => {
     return true;
   });
 });
+
+// Helper to get reward title from cache
+function getRewardTitle(rewardId: string): string {
+  const reward = rewards.value.get(rewardId);
+  return reward?.title || 'Unknown Reward';
+}
 
 // Badge variant based on status
 const getStatusVariant = (status: string) => {
@@ -174,57 +128,78 @@ const viewDetails = async (redemption: any) => {
   showDetailsModal.value = true;
 };
 
-// Mark as redeemed
-const markAsRedeemed = async () => {
-  if (!selectedRedemption.value) return;
-
-  try {
-    // TODO: Update redemption status in DynamoDB
-    // await client.models.RewardRedemption.update({
-    //   id: selectedRedemption.value.id,
-    //   redemptionStatus: 'REDEEMED',
-    //   fulfilledAt: new Date().toISOString(),
-    // });
-
-    // Update local state
-    const index = redemptions.value.findIndex((r) => r.id === selectedRedemption.value.id);
-    if (index !== -1) {
-      redemptions.value[index].redemptionStatus = 'REDEEMED';
-      redemptions.value[index].fulfilledAt = new Date().toISOString();
-    }
-
-    showDetailsModal.value = false;
-  } catch (error) {
-    console.error('Error marking as redeemed:', error);
-  }
-};
-
-// Fetch redemptions
-const fetchRedemptions = async () => {
+// Fetch redemptions from DynamoDB
+async function fetchRedemptions() {
   loading.value = true;
+  error.value = null;
+
   try {
-    await rewardsStore.fetchRedemptions();
-    // redemptions.value = rewardsStore.redemptions;
-  } catch (error) {
-    console.error('Error fetching redemptions:', error);
+    // Fetch all redemptions
+    const redemptionResult = await client.models.RewardRedemption.list();
+
+    if (redemptionResult.data) {
+      redemptions.value = redemptionResult.data;
+
+      // Fetch associated rewards for display
+      const rewardIds = [...new Set(redemptions.value.map(r => r.rewardId))];
+      for (const rewardId of rewardIds) {
+        try {
+          const rewardResult = await client.models.Reward.get({ id: rewardId });
+          if (rewardResult.data) {
+            rewards.value.set(rewardId, rewardResult.data);
+          }
+        } catch (err) {
+          console.error(`Error fetching reward ${rewardId}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching redemptions:', err);
+    error.value = err instanceof Error ? err.message : 'Failed to load redemptions';
   } finally {
     loading.value = false;
   }
-};
+}
 
-onMounted(() => {
-  fetchRedemptions();
+// Mark as redeemed
+async function markAsRedeemed() {
+  if (!selectedRedemption.value) return;
+
+  processingAction.value = true;
+  try {
+    await client.models.RewardRedemption.update({
+      id: selectedRedemption.value.id,
+      redemptionStatus: 'REDEEMED',
+      fulfilledAt: new Date().toISOString(),
+    });
+
+    await fetchRedemptions();
+    showDetailsModal.value = false;
+    selectedRedemption.value = null;
+  } catch (err) {
+    console.error('Error marking as redeemed:', err);
+    alert('Failed to mark as redeemed. Please try again.');
+  } finally {
+    processingAction.value = false;
+  }
+}
+
+onMounted(async () => {
+  await fetchRedemptions();
 });
 </script>
 
 <template>
   <div class="container mx-auto px-4 py-8">
     <!-- Header -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-900">Redemptions</h1>
-      <p class="mt-2 text-gray-600">
-        Manage and track reward redemptions from families
-      </p>
+    <div class="mb-8 flex justify-between items-start">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Redemptions</h1>
+        <p class="mt-2 text-gray-600">
+          Manage and track reward redemptions from families
+        </p>
+      </div>
+      <EnvironmentBadge />
     </div>
 
     <!-- Filters -->
@@ -257,6 +232,14 @@ onMounted(() => {
     <div v-if="loading" class="flex justify-center py-12">
       <LoadingSpinner size="lg" text="Loading redemptions..." />
     </div>
+
+    <!-- Error State -->
+    <Card v-else-if="error" class="mb-6 p-6 bg-red-50 border-red-200">
+      <div class="text-center">
+        <p class="text-red-800 mb-4">{{ error }}</p>
+        <Button variant="danger" @click="fetchRedemptions">Retry</Button>
+      </div>
+    </Card>
 
     <!-- Redemptions Table -->
     <Card v-else>
@@ -307,7 +290,7 @@ onMounted(() => {
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ redemption.rewardTitle }}
+                {{ getRewardTitle(redemption.rewardId) }}
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <Badge :variant="getStatusVariant(redemption.redemptionStatus)">
@@ -373,7 +356,7 @@ onMounted(() => {
         <div class="grid grid-cols-2 gap-4">
           <div>
             <p class="text-sm text-gray-600">Reward</p>
-            <p class="font-medium text-gray-900">{{ selectedRedemption.rewardTitle }}</p>
+            <p class="font-medium text-gray-900">{{ getRewardTitle(selectedRedemption.rewardId) }}</p>
           </div>
           <div>
             <p class="text-sm text-gray-600">Status</p>
@@ -411,15 +394,16 @@ onMounted(() => {
       </div>
 
       <template #footer>
-        <Button variant="secondary" @click="showDetailsModal = false">
+        <Button variant="secondary" @click="showDetailsModal = false" :disabled="processingAction">
           Close
         </Button>
         <Button
           v-if="selectedRedemption?.redemptionStatus === 'PENDING'"
           variant="success"
           @click="markAsRedeemed"
+          :disabled="processingAction"
         >
-          Mark as Redeemed
+          {{ processingAction ? 'Processing...' : 'Mark as Redeemed' }}
         </Button>
       </template>
     </Modal>
